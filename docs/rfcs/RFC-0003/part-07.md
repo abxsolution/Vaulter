@@ -1,0 +1,533 @@
+---
+rfc: RFC-0003
+title: Cryptographic Architecture
+part: 7
+part_title: Secure Memory Architecture
+status: Draft
+classification: Internal
+source: Migrated from ROADMAP.md (historical origin)
+---
+
+# RFC-0003 — Cryptographic Architecture
+
+## Part 7 of 10 — Secure Memory Architecture
+
+> Navigation: [RFC Home](./README.md) · [RFC Index](../README.md) · [Architecture Index](../../architecture/README.md)
+
+---
+
+# 105. Purpose
+
+Cryptography protects data at rest.
+
+Memory protection protects data while in use.
+
+Modern attacks rarely attempt to break AES.
+
+Instead, attackers target plaintext residing in process memory.
+
+This chapter defines how sensitive information SHALL exist in memory.
+
+---
+
+# 106. Security Objectives
+
+Memory protection SHALL minimize:
+
+• Plaintext lifetime
+
+• Number of plaintext copies
+
+• Memory reuse
+
+• Memory disclosure
+
+• Swap exposure
+
+• Crash dump exposure
+
+• Debugger visibility
+
+• Heap fragmentation
+
+---
+
+# 107. Memory Classification
+
+The runtime defines five memory classes.
+
+| Class | Contents | Lifetime |
+|--------|----------|----------|
+| M0 | Public | Unlimited |
+| M1 | Metadata | Session |
+| M2 | Encrypted Data | Unlimited |
+| M3 | Sensitive Plaintext | Milliseconds |
+| M4 | Cryptographic Keys | Shortest Possible |
+
+Only M3 and M4 require secure allocation.
+
+---
+
+# 108. Secure Memory Regions
+
+Sensitive allocations SHALL occur only inside Secure Memory Regions.
+
+Properties
+
+Locked
+
+Zeroized
+
+Non-copyable
+
+Guarded
+
+Lifetime tracked
+
+Secure Memory Regions SHALL never be shared between threads.
+
+---
+
+# 109. Memory Ownership
+
+Every sensitive allocation has exactly one owner.
+
+Example
+
+Vault Session
+
+↓
+
+Crypto Engine
+
+↓
+
+Password Object
+
+↓
+
+UI Rendering
+
+↓
+
+Destroyed
+
+Ownership SHALL never become ambiguous.
+
+---
+
+# 110. Memory Lifecycle
+
+```
+Allocate
+
+↓
+
+Initialize
+
+↓
+
+Use
+
+↓
+
+Zeroize
+
+↓
+
+Release
+
+```
+
+No sensitive object may skip zeroization.
+
+---
+
+# 111. Plaintext Lifetime
+
+Target maximum plaintext lifetime
+
+Password Display
+
+< 500 ms
+
+Clipboard Preparation
+
+< 200 ms
+
+Search Result
+
+< 300 ms
+
+Attachment Chunk
+
+Streaming Only
+
+Session Key
+
+Until Lock
+
+Root Key
+
+Only while unlocked
+
+---
+
+# 112. Secure Allocation Rules
+
+Sensitive buffers SHALL
+
+Never resize
+
+Never reallocate
+
+Never copy implicitly
+
+Never be shared
+
+Never remain after destruction
+
+Heap allocations SHALL be minimized.
+
+---
+
+# 113. Stack vs Heap
+
+Stack
+
+Preferred
+
+Reason
+
+Automatic destruction
+
+Heap
+
+Only when required
+
+Large attachments
+
+Database pages
+
+Streaming buffers
+
+---
+
+# 114. Zeroization
+
+Every sensitive buffer SHALL be overwritten before release.
+
+Pseudo Workflow
+
+```
+Buffer
+
+↓
+
+Overwrite with 0x00
+
+↓
+
+Overwrite with Random
+
+↓
+
+Compiler Barrier
+
+↓
+
+Release
+```
+
+The implementation SHALL ensure the compiler does not optimize away memory clearing.
+
+---
+
+# 115. Copy Prevention
+
+Forbidden
+
+```
+let a = password
+let b = a
+```
+
+if this creates multiple plaintext copies.
+
+Sensitive types SHALL avoid implicit copy semantics where practical.
+
+---
+
+# 116. Immutable Secrets
+
+Plaintext secrets SHALL be immutable.
+
+Modification requires
+
+Decrypt
+
+↓
+
+Create New Object
+
+↓
+
+Destroy Previous Object
+
+Mutable plaintext buffers increase attack surface.
+
+---
+
+# 117. Secure Strings
+
+General-purpose strings SHALL NOT store secrets.
+
+Reason
+
+Unknown internal copies
+
+Unknown lifetime
+
+Automatic optimizations
+
+Dedicated secure containers SHALL be used for sensitive values.
+
+---
+
+# 118. Secure Collections
+
+Arrays containing secrets SHALL
+
+Avoid reallocation
+
+Avoid automatic resizing
+
+Avoid unnecessary iteration
+
+Destroy every element individually
+
+---
+
+# 119. Memory Fragmentation
+
+Sensitive allocations SHOULD remain contiguous.
+
+Reason
+
+Simplifies zeroization
+
+Reduces hidden copies
+
+Improves verification
+
+---
+
+# 120. Crash Safety
+
+Unexpected termination SHALL
+
+Destroy session
+
+Invalidate session key
+
+Leave vault encrypted
+
+Never expose plaintext on disk
+
+Crash recovery SHALL verify vault integrity before reopening.
+
+---
+
+# 121. Debugging Policy
+
+Production builds SHALL disable
+
+Verbose memory dumps
+
+Sensitive object inspection
+
+Developer diagnostics exposing plaintext
+
+Debug builds SHALL clearly indicate reduced security.
+
+---
+
+# 122. Swap Protection
+
+The application cannot fully control virtual memory.
+
+Therefore
+
+Users SHALL be strongly encouraged to enable FileVault.
+
+The application SHALL minimize the amount and lifetime of plaintext in memory to reduce the likelihood of sensitive data reaching swap.
+
+The application SHALL NOT claim that swap writes are impossible.
+
+---
+
+# 123. Screen Rendering
+
+Rendering sensitive information creates another exposure point.
+
+Requirements
+
+Passwords hidden by default
+
+Explicit reveal action
+
+Auto-hide after timeout
+
+No screenshots generated by the application
+
+Optional screen-obscuring mode for presentations
+
+---
+
+# 124. Clipboard Buffer
+
+Clipboard operations SHALL use transient buffers.
+
+Workflow
+
+Decrypt
+
+↓
+
+Copy
+
+↓
+
+Overwrite Temporary Buffer
+
+↓
+
+Destroy
+
+↓
+
+Start Clipboard Timer
+
+Clipboard buffers SHALL never persist beyond the configured timeout.
+
+---
+
+# 125. Search Cache
+
+Search results SHALL contain
+
+Object identifiers
+
+Minimal metadata required for rendering
+
+Search caches SHALL NOT contain decrypted secrets.
+
+Caches SHALL be destroyed when:
+
+Vault locks
+
+Session expires
+
+Application terminates
+
+---
+
+# 126. Memory Pressure
+
+If the operating system signals memory pressure,
+
+the application SHALL:
+
+1. Cancel background decryption work.
+
+2. Destroy idle plaintext buffers.
+
+3. Flush transient caches.
+
+4. Preserve only encrypted state.
+
+---
+
+# 127. Multi-threading Rules
+
+Sensitive objects SHALL NOT be shared across threads unless synchronization and ownership are explicitly defined.
+
+Passing references to plaintext between unrelated execution contexts is prohibited.
+
+Where concurrent processing is required, encrypted data SHALL be preferred over plaintext.
+
+---
+
+# 128. Secure Memory Verification
+
+The implementation SHALL verify:
+
+✓ Sensitive buffers are zeroized.
+
+✓ Plaintext lifetime remains within design targets.
+
+✓ No unintended copies exist.
+
+✓ Crash handling does not persist plaintext.
+
+✓ Search cache contains no secrets.
+
+✓ Clipboard buffers are destroyed after timeout.
+
+Verification methods include:
+
+- Unit Tests
+- Memory Instrumentation
+- Address Sanitizer (development)
+- Leak Detection
+- Manual Security Review
+
+---
+
+# 129. Security Guarantees
+
+The Secure Memory Architecture guarantees:
+
+✓ Minimal plaintext exposure
+
+✓ Controlled object lifetime
+
+✓ Deterministic destruction
+
+✓ Predictable ownership
+
+✓ Reduced memory attack surface
+
+It does NOT guarantee protection against:
+
+- A fully compromised operating system
+- Root-level malware
+- Hardware DMA attacks
+- Cold boot attacks
+- Live memory acquisition by privileged software
+
+These threats are outside the scope of application-level controls.
+
+---
+
+# 130. Outputs Produced
+
+This chapter defines mandatory requirements for:
+
+RFC-0005 Storage Engine
+
+RFC-0006 Secure Enclave
+
+RFC-0007 Runtime Architecture
+
+RFC-0009 Clipboard Manager
+
+RFC-0011 Session Manager
+
+RFC-0016 Secure UI
+
+All implementations SHALL comply with this memory architecture.
+
+---
+
+# End of Part 7
